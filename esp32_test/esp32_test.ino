@@ -5,8 +5,8 @@
 
 #include <WiFiManager.h>
 
-const char* ssid = "ZTE_B24953_2.4G";
-const char* password = "73653304";
+const char* ssid = "SSID";
+const char* password = "password";
 int capture_interval = 20000; // Microseconds between captures
 const char *post_url = "http://orai.ml/projektas.php"; // Location where images are POSTED
 
