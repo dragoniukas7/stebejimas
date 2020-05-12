@@ -2,17 +2,32 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include "Arduino.h"
-
 #include <WiFiManager.h>
+#include <DHT.h>;
 
-const char* ssid = "SSID";
-const char* password = "password";
-int capture_interval = 20000; // Microseconds between captures
+const char* ssid = "Naminis 2.4GHz";
+const char* password = "naminukas";
 const char *post_url = "http://orai.ml/projektas.php"; // Location where images are POSTED
+
+unsigned long previousMillis = 0;
+const long interval = 60000;
 
 bool internet_connected = false;
 long current_millis;
-long last_capture_millis = 0;
+unsigned long last_capture_millis = 0;
+
+#define DHTPIN 15     // what pin we're connected to
+#define DHTTYPE DHT22   // DHT 22  (AM2302)
+#define PIR 12
+#define LED 4
+
+DHT dht(DHTPIN, DHTTYPE); 
+
+WiFiClient client;
+
+String hum;  //Stores humidity value
+String temp; //Stores temperature value
+
 
 // CAMERA_MODEL_AI_THINKER
 #define PWDN_GPIO_NUM     32
@@ -32,6 +47,10 @@ long last_capture_millis = 0;
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
+
+
+
+
 void setup()
 {
   Serial.begin(115200);
@@ -44,8 +63,10 @@ void setup()
     delay(3000);
     ESP.restart();
   }
-  
-  
+    dht.begin();
+    pinMode(PIR,INPUT);  // define PIR pin as input
+    pinMode(LED,OUTPUT);  // define PIR pin as input
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -81,85 +102,41 @@ void setup()
   // camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
-    return;
+    Serial.printf("Nepavyko prisijungti su klaidos kodu: 0x%x", err);
   }
+
 }
 
 bool init_wifi()
 {
-  /*
-  int connAttempts = 0;
-  Serial.println("\r\nConnecting to: " + String(ssid));
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED ) {
-    delay(500);
-    Serial.print(".");
-    if (connAttempts > 10) return false;
-    connAttempts++;
-  }
-  return true;
-  */
+
   WiFiManager wifiManager;
   
   return wifiManager.autoConnect("ESP");
   
 }
 
-/*
-esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+static void take_send_photo()
 {
-  switch (evt->event_id) {
-    case HTTP_EVENT_ERROR:
-      Serial.println("HTTP_EVENT_ERROR");
-      break;
-    case HTTP_EVENT_ON_CONNECTED:
-      Serial.println("HTTP_EVENT_ON_CONNECTED");
-      break;
-    case HTTP_EVENT_HEADER_SENT:
-      Serial.println("HTTP_EVENT_HEADER_SENT");
-      break;
-    case HTTP_EVENT_ON_HEADER:
-      Serial.println();
-      Serial.printf("HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
-      break;
-    case HTTP_EVENT_ON_DATA:
-      Serial.println();
-      Serial.printf("HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-      if (!esp_http_client_is_chunked_response(evt->client)) {
-        // Write out data
-        // printf("%.*s", evt->data_len, (char*)evt->data);
-      }
-      break;
-    case HTTP_EVENT_ON_FINISH:
-      Serial.println("");
-      Serial.println("HTTP_EVENT_ON_FINISH");
-      break;
-    case HTTP_EVENT_DISCONNECTED:
-      Serial.println("HTTP_EVENT_DISCONNECTED");
-      break;
-  }
-  return ESP_OK;
-}
-*/
-static esp_err_t take_send_photo()
-{
-  Serial.println("Taking picture...");
+
+    
+  
+  Serial.println("Fotografuojama...");
   camera_fb_t * fb = NULL;
   esp_err_t res = ESP_OK;
 
   fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("Camera capture failed");
-    return ESP_FAIL;
+    Serial.println("Nepavyko padaryti nuotraukos");
+    return;
   }
 
-
-  WiFiClient client;
+  
+  
   
    if (!client.connect("orai.ml", 80)) 
    {
-    Serial.println("connection failed");   
+    Serial.println("Nepavyko prisijungti");   
    }
    String  dataa;
       dataa =  F("POST /projektas.php HTTP/1.1\r\n");
@@ -189,20 +166,68 @@ Serial.println(dataa);
 
 
   esp_camera_fb_return(fb);
+
+  last_capture_millis = millis();
+
 }
 
+void sendSensorData(){
+
+   hum = dht.readHumidity();
+   temp= dht.readTemperature();
+
+  String data = "temp=" + temp + "&hum=" + hum + "&temp1=-127.0&temp2=-127.0";
+  
+  if(client.connect("orai.ml",80)){
+    
+    client.println("POST /jutikliai.php HTTP/1.1");
+    client.println("Host: orai.ml");
+    client.println("Cache-Control: no-cache");
+    client.println("Content-Type: application/x-www-form-urlencoded");
+    client.print("Content-Length: ");
+    client.println(data.length());
+    client.println();
+    client.println(data);
+  
+    Serial.println(data);
+    while (client.connected())
+    {
+      if ( client.available() )
+      {
+        char str=client.read();
+       Serial.print(str);
+      }    
+     
+     }
+     Serial.println();
+     client.stop();
+  }
+  else {
+    Serial.println("nepavyko issiusti duomenu");
+  }
+}
 
 
 void loop()
 {
-  // TODO check Wifi and reconnect if needed
-  
-  current_millis = millis();
-  if (current_millis - last_capture_millis > capture_interval) { // Take another picture
-    last_capture_millis = millis();
+
+
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    sendSensorData();
+  }
+
+   if (currentMillis - last_capture_millis >= 10) {
+
+      if (digitalRead(PIR) == HIGH) {
     take_send_photo();
   }
-  delay(5000);
+  }
+
+  yield();
+
   /*
     esp_sleep_enable_timer_wakeup(5000000); //10 seconds
     int ret = esp_light_sleep_start();
